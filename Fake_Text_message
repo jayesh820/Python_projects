@@ -1,0 +1,17 @@
+# Install the Twilio library first: pip install twilio
+
+from twilio.rest import Client
+
+# Replace with your Twilio account SID and Auth Token
+account_sid = 'Twilio account SID '
+auth_token = 'Twilio account Auth Token '
+client = Client(account_sid, auth_token)
+
+# Replace with your Twilio phone number and the recipient's number
+message = client.messages.create(
+    body="Hello, this is a test message from Python!",
+    from_='Enter Your Twilio number',  # Your Twilio number
+    to='Enter Recipient's number '      # Recipient's number
+)
+
+print("Message sent! SID:", message.sid)
