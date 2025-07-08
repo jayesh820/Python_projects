@@ -1,0 +1,429 @@
+import streamlit as st
+from datetime import datetime
+import tempfile
+import os
+import requests
+from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont
+import base64
+import time
+
+# Set page config
+st.set_page_config(
+    page_title="Instagram Post Creator",
+    page_icon="📱",
+    layout="centered",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS for styling
+st.markdown("""
+<style>
+    :root {
+        --primary: #405DE6;
+        --secondary: #5851DB;
+        --pink: #E1306C;
+        --purple: #C13584;
+        --red: #FD1D1D;
+        --orange: #F56040;
+        --yellow: #FCAF45;
+        --gradient: linear-gradient(45deg, var(--primary), var(--secondary), var(--pink), var(--purple), var(--red), var(--orange), var(--yellow));
+    }
+    
+    .stApp {
+        max-width: 900px;
+        margin: auto;
+        padding-top: 1rem;
+        background-color: #fafafa;
+    }
+    
+    .header {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 15px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        margin-bottom: 1.5rem;
+        text-align: center;
+        background: linear-gradient(45deg, #fdfcfb, #f7f7f7);
+    }
+    
+    .section {
+        padding: 1.5rem;
+        border-radius: 15px;
+        margin-bottom: 1.5rem;
+        background-color: white;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        border: 1px solid #efefef;
+    }
+    
+    .preview-container {
+        display: flex;
+        justify-content: center;
+        margin: 1rem 0;
+        border-radius: 10px;
+        overflow: hidden;
+        border: 1px solid #e0e0e0;
+        background: #f8f8f8;
+        min-height: 300px;
+    }
+    
+    .hashtag-badge {
+        display: inline-block;
+        background: linear-gradient(45deg, #e0f7fa, #bbdefb);
+        color: #0077b6;
+        padding: 0.3rem 0.8rem;
+        border-radius: 20px;
+        margin: 0.2rem;
+        font-size: 0.9rem;
+        font-weight: 500;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    
+    .stButton>button {
+        background: linear-gradient(45deg, var(--pink), var(--purple)) !important;
+        color: white !important;
+        border: none;
+        width: 100%;
+        padding: 0.8rem;
+        border-radius: 12px;
+        font-weight: bold;
+        font-size: 1.1rem;
+        transition: all 0.3s ease;
+    }
+    
+    .stButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(225, 48, 108, 0.3);
+    }
+    
+    .instagram-post {
+        width: 400px;
+        background: white;
+        border: 1px solid #dbdbdb;
+        border-radius: 5px;
+        margin: 1rem auto;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    
+    .post-header {
+        display: flex;
+        align-items: center;
+        padding: 12px;
+        border-bottom: 1px solid #efefef;
+    }
+    
+    .profile-pic {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        margin-right: 10px;
+        background: linear-gradient(45deg, var(--pink), var(--purple));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: bold;
+    }
+    
+    .username {
+        font-weight: 600;
+        font-size: 0.95rem;
+    }
+    
+    .post-image {
+        width: 100%;
+        height: auto;
+    }
+    
+    .post-actions {
+        padding: 10px 12px;
+        display: flex;
+        gap: 15px;
+        font-size: 1.4rem;
+    }
+    
+    .post-likes {
+        padding: 0 12px;
+        font-weight: 600;
+        font-size: 0.9rem;
+    }
+    
+    .post-caption {
+        padding: 8px 12px;
+        font-size: 0.95rem;
+    }
+    
+    .post-time {
+        padding: 0 12px 12px;
+        color: #8e8e8e;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+    }
+    
+    .tag {
+        background: linear-gradient(45deg, #f5f5f5, #e8e8e8);
+        padding: 0.3rem 0.8rem;
+        border-radius: 20px;
+        margin: 0.2rem;
+        font-size: 0.85rem;
+        display: inline-block;
+        color: #555;
+    }
+    
+    .stTextInput>div>div>input, .stTextArea>div>div>textarea {
+        background-color: #fafafa !important;
+    }
+    
+    .success-box {
+        background: linear-gradient(45deg, #e8f5e9, #c8e6c9);
+        padding: 1.5rem;
+        border-radius: 15px;
+        text-align: center;
+        margin: 1rem 0;
+    }
+    
+    .social-icons {
+        display: flex;
+        justify-content: center;
+        gap: 15px;
+        margin-top: 1rem;
+        font-size: 1.8rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Initialize session state
+def init_session_state():
+    if 'media_file' not in st.session_state:
+        st.session_state.media_file = None
+    if 'caption' not in st.session_state:
+        st.session_state.caption = ""
+    if 'hashtags' not in st.session_state:
+        st.session_state.hashtags = "#instagood #photooftheday #love #instagram"
+    if 'location' not in st.session_state:
+        st.session_state.location = ""
+    if 'schedule_time' not in st.session_state:
+        st.session_state.schedule_time = datetime.now()
+    if 'alt_text' not in st.session_state:
+        st.session_state.alt_text = ""
+    if 'instagram_username' not in st.session_state:
+        st.session_state.instagram_username = "your_username"
+    if 'post_success' not in st.session_state:
+        st.session_state.post_success = False
+
+init_session_state()
+
+# Add Instagram logo to the sidebar
+st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/e/e7/Instagram_logo_2016.svg/768px-Instagram_logo_2016.svg.png", width=100)
+st.sidebar.title("Instagram Post Creator")
+
+# Account section in sidebar
+st.sidebar.subheader("Your Instagram Account")
+instagram_username = st.sidebar.text_input("Username", value=st.session_state.instagram_username)
+st.session_state.instagram_username = instagram_username
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("Saved Drafts")
+if st.sidebar.button("Summer Vacation Post"):
+    st.session_state.caption = "Enjoying the beach vibes! 🌊☀️ #summer #vacation #beach"
+    st.session_state.hashtags = "#summer #vacation #beach #sun #ocean"
+    
+if st.sidebar.button("Food Post"):
+    st.session_state.caption = "Delicious dinner at my favorite restaurant! 🍽️🍷 #foodie #dinner"
+    st.session_state.hashtags = "#foodie #dinner #foodporn #foodstagram"
+
+st.sidebar.markdown("---")
+st.sidebar.caption("Note: Actual Instagram posting requires API integration which is simulated in this demo")
+
+# Main app content
+st.markdown('<div class="header"><h1>📱 Instagram Post Creator</h1><p>Create and schedule Instagram posts with all features</p></div>', unsafe_allow_html=True)
+
+if st.session_state.post_success:
+    st.markdown('<div class="success-box"><h2>🎉 Post Published Successfully!</h2><p>Your post has been published to your Instagram account.</p></div>', unsafe_allow_html=True)
+    
+    # Simulate engagement
+    st.subheader("Post Engagement")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Likes", "1,245", "+342")
+    col2.metric("Comments", "87", "+21")
+    col3.metric("Shares", "42", "+9")
+    
+    st.markdown("---")
+
+# Media Upload Section
+with st.container():
+    st.subheader("📸 1. Media Upload")
+    col1, col2 = st.columns([3, 2])
+    
+    with col1:
+        uploaded_file = st.file_uploader(
+            "Upload Image/Video",
+            type=["jpg", "jpeg", "png", "mp4", "mov"],
+            help="Maximum 15MB for photos, 4GB for videos",
+            key="media_upload"
+        )
+        
+        if uploaded_file:
+            # Save to temp file for preview
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
+                tmp_file.write(uploaded_file.getbuffer())
+                st.session_state.media_file = tmp_file.name
+            
+            # Show media info
+            file_size = len(uploaded_file.getvalue()) / (1024 * 1024)
+            st.caption(f"File type: {uploaded_file.type} | Size: {file_size:.2f} MB")
+    
+    with col2:
+        st.caption("📝 Media Requirements")
+        st.markdown("- **Images:** JPG/PNG (4:5 to 16:9 ratio)")
+        st.markdown("- **Videos:** MP4/MOV (3-60 seconds)")
+        st.markdown("- **Max size:** 15MB (photo), 4GB (video)")
+        st.markdown("- **Recommended:** 1080x1350 pixels")
+
+# Preview Section
+if st.session_state.media_file:
+    with st.container():
+        st.subheader("👀 Preview")
+        st.markdown('<div class="preview-container">', unsafe_allow_html=True)
+        
+        if uploaded_file.type.startswith('image'):
+            # Create Instagram-style post preview
+            st.markdown('<div class="instagram-post">', unsafe_allow_html=True)
+            
+            # Post header
+            st.markdown('<div class="post-header">', unsafe_allow_html=True)
+            st.markdown(f'<div class="profile-pic">{st.session_state.instagram_username[0].upper()}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="username">{st.session_state.instagram_username}</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)  # End post-header
+            
+            # Post image
+            st.markdown(f'<img src="data:image/png;base64,{base64.b64encode(uploaded_file.getvalue()).decode()}" class="post-image">', unsafe_allow_html=True)
+            
+            # Post actions
+            st.markdown('<div class="post-actions">', unsafe_allow_html=True)
+            st.markdown('<div>❤️</div>', unsafe_allow_html=True)
+            st.markdown('<div>💬</div>', unsafe_allow_html=True)
+            st.markdown('<div>↗️</div>', unsafe_allow_html=True)
+            st.markdown('<div style="margin-left: auto;">📌</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)  # End post-actions
+            
+            # Post likes
+            st.markdown('<div class="post-likes">1,245 likes</div>', unsafe_allow_html=True)
+            
+            # Post caption
+            caption_preview = st.session_state.caption if st.session_state.caption else "Your caption will appear here"
+            st.markdown(f'<div class="post-caption"><b>{st.session_state.instagram_username}</b> {caption_preview}</div>', unsafe_allow_html=True)
+            
+            # Post time
+            st.markdown('<div class="post-time">1 HOUR AGO</div>', unsafe_allow_html=True)
+            
+            st.markdown('</div>', unsafe_allow_html=True)  # End instagram-post
+        
+        elif uploaded_file.type.startswith('video'):
+            st.video(st.session_state.media_file)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# Post Details Section
+with st.form("post_details", clear_on_submit=False):
+    st.subheader("📝 2. Post Details")
+    
+    caption = st.text_area(
+        "Caption",
+        height=150,
+        placeholder="Write your caption...",
+        help="Emojis and line breaks supported",
+        value=st.session_state.caption
+    )
+    
+    with st.expander("⚙️ Advanced Options"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            location = st.text_input("📍 Add Location", value=st.session_state.location)
+            alt_text = st.text_input("♿ Alt Text (Accessibility)", 
+                                    placeholder="Describe your media for visually impaired",
+                                    value=st.session_state.alt_text)
+        
+        with col2:
+            schedule = st.checkbox("⏰ Schedule Post", value=True)
+            if schedule:
+                schedule_time = st.datetime_input(
+                    "Schedule Time",
+                    value=st.session_state.schedule_time,
+                    min_value=datetime.now()
+                )
+    
+    hashtags = st.text_area(
+        "🏷️ Hashtags",
+        height=100,
+        placeholder="#trending #viral",
+        value=st.session_state.hashtags,
+        help="Separate hashtags with spaces. First 30 hashtags will be used."
+    )
+    
+    # Post Actions
+    st.subheader("🚀 3. Post Actions")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        share_to_feed = st.form_submit_button("📤 Share to Feed")
+    
+    with col2:
+        share_to_story = st.form_submit_button("🌈 Share to Story")
+    
+    with col3:
+        save_draft = st.form_submit_button("💾 Save Draft")
+    
+    if share_to_feed or share_to_story or save_draft:
+        if not st.session_state.media_file:
+            st.warning("⚠️ Please upload media first!")
+        else:
+            # Process hashtags
+            hashtag_list = [tag.strip() for tag in hashtags.split() if tag.startswith("#")]
+            
+            # Save to session state
+            st.session_state.caption = caption
+            st.session_state.hashtags = hashtags
+            st.session_state.location = location
+            st.session_state.alt_text = alt_text
+            
+            # Show success message
+            if share_to_feed or share_to_story:
+                st.session_state.post_success = True
+                st.experimental_rerun()
+            
+            elif save_draft:
+                st.success("✅ Draft saved successfully!")
+
+# Features Section
+st.markdown("---")
+st.subheader("✨ All Instagram Features Included")
+
+features = [
+    {"icon": "📸", "title": "Multiple Media Formats", "desc": "Supports images, videos, carousels, and Reels"},
+    {"icon": "✏️", "title": "Rich Caption Editor", "desc": "Format text, add emojis, and create engaging captions"},
+    {"icon": "🏷️", "title": "Hashtag Manager", "desc": "Add and organize hashtags with suggestions"},
+    {"icon": "📍", "title": "Location Tagging", "desc": "Tag locations to increase discoverability"},
+    {"icon": "⏰", "title": "Scheduling", "desc": "Schedule posts for optimal engagement times"},
+    {"icon": "📊", "title": "Analytics", "desc": "Track post performance and engagement metrics"},
+    {"icon": "♿", "title": "Accessibility", "desc": "Add alt text for visually impaired users"},
+    {"icon": "🔄", "title": "Cross-posting", "desc": "Share to Facebook and other platforms simultaneously"},
+]
+
+cols = st.columns(4)
+for i, feature in enumerate(features):
+    with cols[i % 4]:
+        st.markdown(f"""
+        <div style="text-align: center; padding: 1rem; border-radius: 10px; background: white; 
+                    box-shadow: 0 4px 8px rgba(0,0,0,0.05); height: 160px; margin-bottom: 1rem;">
+            <div style="font-size: 2rem; margin-bottom: 0.5rem;">{feature['icon']}</div>
+            <h4 style="margin: 0; color: #405DE6;">{feature['title']}</h4>
+            <p style="font-size: 0.85rem; color: #555;">{feature['desc']}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+# Footer
+st.markdown("---")
+st.caption("Note: This app simulates Instagram posting functionality. For actual API integration, Instagram Business Account and Facebook Developer access are required.")
+st.markdown('<div class="social-icons"><div>📱</div><div>📸</div><div>💬</div><div>🔔</div><div>❤️</div></div>', unsafe_allow_html=True)
