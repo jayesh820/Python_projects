@@ -1,0 +1,333 @@
+import streamlit as st
+import cv2
+import mediapipe as mp
+import pyttsx3
+import random
+import time
+import numpy as np
+from PIL import Image
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
+
+# Set page config
+st.set_page_config(
+    page_title="Roast Ya Toast 🤖",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Voice engine initialization
+@st.cache_resource
+def get_voice_engine():
+    engine = pyttsx3.init()
+    engine.setProperty('rate', 150)
+    return engine
+
+engine = get_voice_engine()
+
+# Dialogues database
+DIALOGUES = {
+    "compliments": [
+        "You're the human version of a power-up!",
+        "If brilliance was a crime, you'd be doing life!",
+        "You're cooler than the other side of the pillow!",
+        "You're not just smart, you're street smart!",
+        "You bring positive energy like a walking sunshine!",
+        "You're so sharp, you could cut glass with your words!",
+        "You're basically the cheat code to life!",
+        "You glow differently when you're confident!",
+        "You're a legend in progress!",
+        "You don't need luck. You're skill powered!"
+    ],
+    "light_roasts": [
+        "Are you Wi-Fi? Because I'm not feeling a strong connection.",
+        "You have something on your chin... no, the third one down.",
+        "You're like a cloud: when you disappear, it's a beautiful day.",
+        "You have something on your face... oh wait, that's just your face.",
+        "You're as useful as a 'read more' button on Twitter.",
+        "You're the reason shampoo bottles have instructions.",
+        "Your secrets are always safe with me. I never even listen!",
+        "You're like a software update — always popping up at the wrong time.",
+        "You bring everyone so much joy… when you leave the room.",
+        "You're proof that evolution can go in reverse."
+    ],
+    "jokes": [
+        "Why don't scientists trust atoms? Because they make up everything!",
+        "Parallel lines have so much in common… it's a shame they'll never meet.",
+        "I told my computer I needed a break, and now it won't stop sending me vacation ads!",
+        "I'm reading a book on anti-gravity. It's impossible to put down!",
+        "Why did the scarecrow win an award? Because he was outstanding in his field!",
+        "My internet went down for 5 minutes, so I had to talk to my family. They seem nice.",
+        "Why don't eggs tell jokes? They'd crack each other up.",
+        "What do you call fake spaghetti? An impasta!",
+        "Why did the bicycle fall over? Because it was two-tired!",
+        "How do you organize a space party? You planet!"
+    ],
+    "deep_roasts": [
+        "You're like a software bug — always there, never helpful.",
+        "You're the human version of a 404 error.",
+        "Even mirrors avoid reflecting your choices.",
+        "If laziness was an Olympic sport, you'd still come last.",
+        "You're proof that rock bottom has a basement.",
+        "Your potential called — it's still waiting to be used.",
+        "You're not dumb — you just have bad luck thinking!",
+        "Even your shadow leaves you when the light shines.",
+        "You bring nothing to the table — not even the table!",
+        "You're the extra in your own life story."
+    ],
+    "facts": [
+        "Honey never spoils. Archaeologists have found pots of honey in ancient Egyptian tombs that are over 3,000 years old and still perfectly good to eat!",
+        "The shortest war in history was between Britain and Zanzibar on August 27, 1896. Zanzibar surrendered after 38 minutes.",
+        "A group of flamingos is called a 'flamboyance'.",
+        "The inventor of the frisbee was turned into a frisbee after he died!",
+        "Octopuses have three hearts, nine brains, and blue blood.",
+        "Bananas are berries, but strawberries aren't.",
+        "The dot over the letter 'i' is called a tittle.",
+        "A jiffy is an actual unit of time: 1/100th of a second.",
+        "The unicorn is the national animal of Scotland.",
+        "There are more possible iterations of a game of chess than there are atoms in the known universe."
+    ]
+}
+
+# Custom CSS for styling
+st.markdown("""
+    <style>
+        .main {
+            background-color: #f8f9fa;
+        }
+        .sidebar .sidebar-content {
+            background-color: #343a40;
+            color: white;
+        }
+        .stButton>button {
+            background-color: #4a4a4a;
+            color: white;
+            border-radius: 8px;
+            padding: 10px 24px;
+            transition: all 0.3s;
+        }
+        .stButton>button:hover {
+            background-color: #5a5a5a;
+            transform: scale(1.05);
+        }
+        .dialogue-box {
+            background-color: #ffffff;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .title-text {
+            color: #ff4b4b;
+            font-weight: 800;
+        }
+        .hand-gesture-info {
+            background-color: #e9f7ef;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# Function to cycle through items randomly without repetition
+def get_random_item(category):
+    if not st.session_state.get(f"{category}_remaining"):
+        st.session_state[f"{category}_remaining"] = DIALOGUES[category].copy()
+    
+    if not st.session_state[f"{category}_remaining"]:
+        st.session_state[f"{category}_remaining"] = DIALOGUES[category].copy()
+    
+    item = random.choice(st.session_state[f"{category}_remaining"])
+    st.session_state[f"{category}_remaining"].remove(item)
+    return item
+
+# Initialize session state
+if 'last_message' not in st.session_state:
+    st.session_state.last_message = ""
+    st.session_state.last_category = ""
+    st.session_state.message_history = []
+
+# Speak & print function
+def speak_and_print(msg, category):
+    st.session_state.last_message = msg
+    st.session_state.last_category = category
+    st.session_state.message_history.append((category, msg))
+    
+    if len(st.session_state.message_history) > 10:
+        st.session_state.message_history.pop(0)
+    
+    engine.say(msg)
+    engine.runAndWait()
+
+# Mediapipe hand detection
+mp_hands = mp.solutions.hands
+hands = mp_hands.Hands(
+    static_image_mode=False,
+    max_num_hands=1,
+    min_detection_confidence=0.7,
+    min_tracking_confidence=0.5
+)
+
+# Count fingers function
+def count_fingers(hand_landmarks):
+    count = 0
+    tips_ids = [8, 12, 16, 20]  # Finger tip landmarks (excluding thumb)
+    
+    # Check fingers (except thumb)
+    for tip_id in tips_ids:
+        if hand_landmarks.landmark[tip_id].y < hand_landmarks.landmark[tip_id - 2].y:
+            count += 1
+    
+    # Check thumb (different logic for left/right hand)
+    if hand_landmarks.landmark[4].x < hand_landmarks.landmark[3].x:
+        count += 1
+    
+    return count
+
+# Webcam processing class
+class VideoTransformer(VideoTransformerBase):
+    def __init__(self):
+        self.last_gesture_time = 0
+        self.gesture_cooldown = 3  # seconds
+    
+    def transform(self, frame):
+        img = frame.to_ndarray(format="bgr24")
+        img = cv2.flip(img, 1)
+        rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        results = hands.process(rgb_img)
+        
+        current_time = time.time()
+        
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                # Draw hand landmarks
+                mp.solutions.drawing_utils.draw_landmarks(
+                    img, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+                
+                # Count fingers and trigger actions
+                fingers = count_fingers(hand_landmarks)
+                
+                # Only trigger if cooldown has passed
+                if current_time - self.last_gesture_time > self.gesture_cooldown:
+                    if fingers == 1:
+                        msg = get_random_item("compliments")
+                        speak_and_print(msg, "Compliment")
+                        self.last_gesture_time = current_time
+                    elif fingers == 2:
+                        msg = get_random_item("light_roasts")
+                        speak_and_print(msg, "Light Roast")
+                        self.last_gesture_time = current_time
+                    elif fingers == 3:
+                        msg = get_random_item("jokes")
+                        speak_and_print(msg, "Joke")
+                        self.last_gesture_time = current_time
+                    elif fingers == 5:
+                        msg = get_random_item("deep_roasts")
+                        speak_and_print(msg, "Deep Roast")
+                        self.last_gesture_time = current_time
+                    elif fingers == 4:
+                        msg = get_random_item("facts")
+                        speak_and_print(msg, "Fun Fact")
+                        self.last_gesture_time = current_time
+        
+        return img
+
+# App layout
+st.title("🤖 Roast Ya Toast - Enhanced Edition")
+st.markdown("""
+    <div class="hand-gesture-info">
+        <h4>👋 Hand Gesture Controls:</h4>
+        <ul>
+            <li>1 Finger: Get a compliment</li>
+            <li>2 Fingers: Get a light roast</li>
+            <li>3 Fingers: Hear a joke</li>
+            <li>4 Fingers: Learn a fun fact</li>
+            <li>5 Fingers: Get a deep roast</li>
+        </ul>
+        <p>Note: There's a 3-second cooldown between gestures to prevent spamming.</p>
+    </div>
+""", unsafe_allow_html=True)
+
+# Main columns
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    st.header("🎥 Live Camera Feed")
+    ctx = webrtc_streamer(
+        key="example",
+        video_transformer_factory=VideoTransformer,
+        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+        media_stream_constraints={"video": True, "audio": False}
+    )
+    
+    if not ctx.state.playing:
+        st.warning("Camera is not active. Please allow camera access to use gesture controls.")
+
+with col2:
+    st.header("💬 Dialogue Output")
+    
+    if st.session_state.last_message:
+        category_color = {
+            "Compliment": "green",
+            "Light Roast": "orange",
+            "Joke": "blue",
+            "Deep Roast": "red",
+            "Fun Fact": "purple"
+        }.get(st.session_state.last_category, "black")
+        
+        st.markdown(f"""
+            <div class="dialogue-box">
+                <h4 style="color: {category_color};">{st.session_state.last_category}</h4>
+                <p>{st.session_state.last_message}</p>
+            </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.info("Show hand gestures to the camera to get started!")
+    
+    st.header("📜 Message History")
+    if st.session_state.message_history:
+        for category, msg in reversed(st.session_state.message_history):
+            st.markdown(f"**{category}**: {msg}")
+    else:
+        st.write("No messages yet")
+
+# Sidebar controls
+with st.sidebar:
+    st.title("⚙️ Settings")
+    
+    st.subheader("Voice Settings")
+    voices = engine.getProperty('voices')
+    selected_voice = st.selectbox(
+        "Select Voice",
+        [voice.name for voice in voices],
+        index=0
+    )
+    engine.setProperty('voice', voices[[voice.name for voice in voices].index(selected_voice)].id)
+    
+    rate = st.slider("Speech Rate", 100, 300, 150)
+    engine.setProperty('rate', rate)
+    
+    st.subheader("Manual Controls")
+    if st.button("Random Compliment"):
+        msg = get_random_item("compliments")
+        speak_and_print(msg, "Compliment")
+    
+    if st.button("Random Joke"):
+        msg = get_random_item("jokes")
+        speak_and_print(msg, "Joke")
+    
+    if st.button("Clear History"):
+        st.session_state.message_history = []
+        st.experimental_rerun()
+    
+    st.markdown("---")
+    st.markdown("""
+        <div style="color: #aaa; font-size: 0.8em;">
+            <p>Created with Streamlit, MediaPipe, and pyttsx3</p>
+            <p>Gesture recognition powered by hand tracking</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+# Add some space at the bottom
+st.markdown("<br><br>", unsafe_allow_html=True)
